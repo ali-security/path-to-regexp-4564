@@ -2,6 +2,50 @@ var pathToRegExp = require('./');
 var assert = require('assert');
 
 describe('path-to-regexp', function () {
+  describe('CVE-2024-52798', function () {
+    it('should compare execution times for normal vs malicious input', function () {
+      function measureTime(pattern, input) {
+        const regex = pathToRegExp(pattern);
+        const start = process.hrtime(); // High-resolution timer
+        regex.test(input);
+        const diff = process.hrtime(start);
+        const seconds = diff[0]; // Get seconds
+        const nanoseconds = diff[1]; // Get nanoseconds
+        return seconds * 1e3 + nanoseconds / 1e6; // Convert to milliseconds
+      }
+
+      // Normal input (expected to be fast)
+      const normalTime = measureTime('/:a-:b', '/foo-bar');
+
+      // Malicious input designed for backtracking (e.g., long repeating patterns)
+      // source: https://blakeembrey.com/posts/2024-09-web-redos/
+      const evilInput = '/flights/' + new Array(500001).join('-') + '/x'; // repeat func is not supported at nodejs 0.112
+      const evilTime = measureTime('/flights/:from-:to', evilInput);
+
+      console.log('Normal input time: ' + normalTime.toFixed(3) + ' ms');
+      console.log('Malicious input time: ' + evilTime.toFixed(3) + ' ms');
+
+      // Validate that the malicious input does not take exponentially longer
+      assert(evilTime < normalTime * 1000, 'Potential ReDoS detected!');
+    });
+
+    it('should generate a regex without backtracking', function () {
+      var nodeVersion = process.versions.node;
+      var versionParts = nodeVersion.split('.'); // Split "0.12.18" → ["0", "12", "18"]
+      var major = parseInt(versionParts[0], 10);
+      var minor = parseInt(versionParts[1], 10);
+
+      var expected; // nodejs is interpreted differently on different versions
+      if (major === 0 && minor <= 12) {
+        expected = new RegExp("^(?:\/([^/]+?))-(?:((?:(?!\/|-).)+?))\/?$", "i"); //tested on nodejs 0.12
+      } else {
+        expected = /^(?:\/([^/]+?))-(?:((?:(?!\/|-).)+?))\/?$/i; // tested on nodejs 0.4.9
+      };
+
+      assert.deepEqual(pathToRegExp('/:a-:b'), expected);
+    });
+  });
+
   describe('strings', function () {
     it('should match simple paths', function () {
       var params = [];
